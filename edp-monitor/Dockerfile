@@ -9,26 +9,28 @@ RUN apk add --no-cache \
     chromium-chromedriver \
     xvfb \
     x11vnc \
-    novnc \
-    supervisor \
     ttf-freefont \
-    font-noto
+    font-noto \
+    bash \
+    git
 
-# Create virtual environment and install Python packages
-RUN python3 -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-RUN pip install --no-cache-dir selenium requests
+# Install noVNC manually
+RUN git clone --depth 1 https://github.com/novnc/noVNC.git /opt/novnc && \
+    git clone --depth 1 https://github.com/novnc/websockify.git /opt/novnc/utils/websockify && \
+    ln -s /opt/novnc/vnc.html /opt/novnc/index.html
+
+# Install Python packages
+RUN pip3 install --no-cache-dir --break-system-packages selenium requests
 
 # Set up directories
-RUN mkdir -p /data/chrome-profile /app /var/log/supervisor
+RUN mkdir -p /data/chrome-profile /app
 
 # Copy application files
 COPY edp_monitor.py /app/
 COPY run.sh /app/
-COPY supervisord.conf /etc/supervisord.conf
 RUN chmod +x /app/run.sh
 
 # Expose noVNC port
 EXPOSE 6080
 
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+CMD ["/app/run.sh"]
