@@ -27,10 +27,4 @@ RUN mkdir -p /data/chrome-profile /app
 
 # Copy application files
 COPY edp_monitor.py /app/
-COPY run.sh /app/
-RUN chmod +x /app/run.sh
-
-# Expose noVNC port
-EXPOSE 6080
-
-CMD ["/app/run.sh"]
+COPY rootfs /

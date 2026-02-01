@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv bashio
+sleep 3
+export DISPLAY=:99
+exec x11vnc -display :99 -forever -shared -nopw -rfbport 5900

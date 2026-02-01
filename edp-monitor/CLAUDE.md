@@ -7,6 +7,9 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
+| #514 | 11:43 AM | ✅ | Migrated Addon to Home Assistant S6-Overlay Structure | ~401 |
+| #513 | " | 🔵 | Dockerfile Architecture for Headless Chrome Automation with noVNC | ~491 |
+| #512 | 11:40 AM | 🔄 | Simplified Home Assistant Add-on Dockerfile by Removing Supervisord Dependency | ~451 |
 | #511 | 11:39 AM | 🔄 | Replaced Supervisord with Direct Process Management for Headless Browser Setup | ~459 |
 | #510 | " | ✅ | Simplified Dockerfile to Remove Supervisord and Use Direct run.sh Execution | ~483 |
 | #508 | 11:35 AM | 🟣 | Created Home Assistant Add-on Repository for EDP Voucher Monitoring with noVNC Interface | ~477 |
