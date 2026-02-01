@@ -8,6 +8,4 @@
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #522 | 11:46 AM | 🔵 | Home Assistant Addon Service Configuration with Virtual Display and noVNC Access | ~418 |
-| #519 | 11:44 AM | 🟣 | Implemented s6-overlay Service Architecture for Home Assistant Add-on | ~416 |
-| #518 | " | 🟣 | Created S6 Service Runner for EDP Monitor in Home Assistant Add-on | ~409 |
 </claude-mem-context>

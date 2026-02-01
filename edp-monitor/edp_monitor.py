@@ -3,18 +3,39 @@
 EDP Voucher Monitor - Home Assistant Add-on
 """
 
+import sys
 import json
 import os
 import random
 import time
-import requests
+import traceback
+
+# Force unbuffered output
+sys.stdout.reconfigure(line_buffering=True)
+sys.stderr.reconfigure(line_buffering=True)
+
+print("[init] Starting EDP Monitor script...", flush=True)
+
+try:
+    import requests
+    print("[init] requests OK", flush=True)
+except Exception as e:
+    print(f"[init] Failed to import requests: {e}", flush=True)
+
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    print("[init] selenium OK", flush=True)
+except Exception as e:
+    print(f"[init] Failed to import selenium: {e}", flush=True)
+    traceback.print_exc()
+    sys.exit(1)
+
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 # Configuration
 CONFIG_PATH = "/data/options.json"
@@ -259,4 +280,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    print("[init] Entering main...", flush=True)
+    try:
+        main()
+    except Exception as e:
+        print(f"[FATAL] Uncaught exception: {e}", flush=True)
+        traceback.print_exc()
+        sys.exit(1)

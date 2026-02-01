@@ -1,5 +1,5 @@
 name: EDP Voucher Monitor
-version: "1.0.1"
+version: "1.0.2"
 slug: edp_voucher_monitor
 init: false
 description: Monitoriza disponibilidade de vouchers EDP Packs e envia notificacao via ntfy
