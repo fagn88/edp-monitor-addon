@@ -7,7 +7,10 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #532 | 11:53 AM | ✅ | Added Explicit Error Handling and Logging for Selenium Import | ~388 |
+| #538 | 11:58 AM | 🟣 | EDP Monitor Home Assistant Addon Version 1.0.0 Released | ~379 |
+| #534 | 11:53 AM | ✅ | Incremented Home Assistant Add-on Version to 1.0.2 | ~360 |
+| #533 | " | ✅ | Added Unbuffered Output and Global Exception Handling for Container Debugging | ~502 |
+| #532 | " | ✅ | Added Explicit Error Handling and Logging for Selenium Import | ~388 |
 | #531 | " | ✅ | Added Diagnostic Logging and Unbuffered Output for Container Debugging | ~447 |
 | #530 | " | 🔵 | Home Assistant Addon Python Script Architecture and Configuration Loading | ~549 |
 | #527 | 11:47 AM | ✅ | Updated Home Assistant Add-on Configuration to Version 1.0.1 with init: false | ~364 |
