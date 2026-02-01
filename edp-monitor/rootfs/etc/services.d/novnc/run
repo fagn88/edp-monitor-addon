@@ -1,3 +1,0 @@
-#!/usr/bin/with-contenv bashio
-sleep 5
-exec /opt/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080

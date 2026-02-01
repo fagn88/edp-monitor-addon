@@ -1,6 +1,30 @@
 #!/usr/bin/with-contenv bashio
-sleep 10
+
+bashio::log.info "==================================="
+bashio::log.info "  EDP Voucher Monitor Starting"
+bashio::log.info "==================================="
+
+# Start Xvfb
+bashio::log.info "Starting Xvfb..."
+Xvfb :99 -screen 0 1280x720x24 &
+sleep 3
+
 export DISPLAY=:99
-bashio::log.info "Starting EDP Voucher Monitor..."
-bashio::log.info "noVNC available at port 6080"
+
+# Start x11vnc
+bashio::log.info "Starting x11vnc..."
+x11vnc -display :99 -forever -shared -nopw -rfbport 5900 -q &
+sleep 2
+
+# Start noVNC
+bashio::log.info "Starting noVNC on port 6080..."
+/opt/novnc/utils/novnc_proxy --vnc localhost:5900 --listen 6080 &
+sleep 2
+
+bashio::log.info "==================================="
+bashio::log.info "  noVNC: http://<your-ip>:6080"
+bashio::log.info "==================================="
+
+# Start monitor
+bashio::log.info "Starting EDP Monitor..."
 exec python3 /app/edp_monitor.py
