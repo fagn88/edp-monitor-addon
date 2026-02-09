@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0
+
+- Add monthly auto-scheduling (default: day 1 at 00:00)
+- Add configurable `schedule_day` and `schedule_hour` options
+- Change boot mode to `auto` (addon starts with Home Assistant)
+- Add notification when monitoring starts
+- Add notification when login is required or expired
+- Add notification on driver/browser errors
+- Add notification with next scheduled execution date
+
 ## 1.0.2
 
 - Add debug logging with unbuffered output

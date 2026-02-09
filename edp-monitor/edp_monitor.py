@@ -56,7 +56,9 @@ def load_config():
         return {
             "ntfy_topic": "edp-voucher",
             "check_interval_min": 240,
-            "check_interval_max": 360
+            "check_interval_max": 360,
+            "schedule_day": 1,
+            "schedule_hour": 0
         }
 
 
@@ -159,14 +161,72 @@ def check_voucher(driver):
         return None, f"erro: {e}"
 
 
-def main():
-    config = load_config()
+def wait_until_schedule(schedule_day, schedule_hour, ntfy_topic):
+    """Wait until the scheduled day/hour to start monitoring"""
+    now = datetime.now()
+
+    # Build target datetime for this month
+    try:
+        target = now.replace(day=schedule_day, hour=schedule_hour,
+                             minute=0, second=0, microsecond=0)
+    except ValueError:
+        # Day doesn't exist in this month (e.g. day 31 in Feb)
+        # Skip to next month
+        if now.month == 12:
+            target = datetime(now.year + 1, 1, schedule_day,
+                              schedule_hour, 0, 0)
+        else:
+            target = datetime(now.year, now.month + 1, schedule_day,
+                              schedule_hour, 0, 0)
+
+    # If we're already past the target this month, schedule for next month
+    if target <= now:
+        if now.month == 12:
+            target = datetime(now.year + 1, 1, schedule_day,
+                              schedule_hour, 0, 0)
+        else:
+            try:
+                target = datetime(now.year, now.month + 1, schedule_day,
+                                  schedule_hour, 0, 0)
+            except ValueError:
+                # Day doesn't exist in next month either, skip to month after
+                month = now.month + 2 if now.month <= 10 else (now.month + 2 - 12)
+                year = now.year if now.month <= 10 else now.year + 1
+                target = datetime(year, month, schedule_day,
+                                  schedule_hour, 0, 0)
+
+    delta = (target - now).total_seconds()
+
+    if delta <= 0:
+        # Should not happen, but safety check
+        return
+
+    days = delta / 86400
+    hours = delta / 3600
+    target_str = target.strftime("%d/%m/%Y às %H:%M")
+
+    print(f"[schedule] Próxima execução: {target_str} (em {days:.1f} dias)")
+    notify_phone(ntfy_topic, "EDP Monitor - Agendado",
+                 f"Próxima execução: {target_str} (em {days:.1f} dias)")
+
+    # Sleep in chunks of 1 hour to keep the process responsive
+    while True:
+        now = datetime.now()
+        remaining = (target - now).total_seconds()
+        if remaining <= 0:
+            break
+        sleep_time = min(remaining, 3600)
+        time.sleep(sleep_time)
+
+
+def run_monitoring(config):
+    """Run the voucher monitoring loop"""
     ntfy_topic = config.get("ntfy_topic", "edp-voucher")
     interval_min = config.get("check_interval_min", 240)
     interval_max = config.get("check_interval_max", 360)
 
     print("=" * 60)
-    print("  EDP Voucher Monitor - Home Assistant Add-on")
+    print("  EDP Voucher Monitor - Monitorização Iniciada")
     print("=" * 60)
     print(f"  ntfy topic: {ntfy_topic}")
     print(f"  Interval: {interval_min//60}-{interval_max//60} min")
@@ -175,28 +235,33 @@ def main():
     print(">>> Open noVNC at port 6080 to login if needed <<<")
     print()
 
+    # Notify that monitoring has started
+    notify_phone(ntfy_topic, "EDP Monitor Iniciado",
+                 f"Monitorização de vouchers iniciada! Intervalo: {interval_min//60}-{interval_max//60} min")
+
     # Wait for Xvfb and VNC to start
-    print("[main] Waiting for display services...")
+    print("[monitor] Waiting for display services...")
     time.sleep(10)
 
     # Create driver
-    print("[main] Creating Chrome driver...")
+    print("[monitor] Creating Chrome driver...")
     driver = create_driver()
 
     if not driver:
-        print("[main] Failed to create driver, retrying in 30s...")
+        print("[monitor] Failed to create driver, retrying in 30s...")
         time.sleep(30)
         driver = create_driver()
 
     if not driver:
-        print("[main] Could not create driver. Check logs.")
-        notify_phone(ntfy_topic, "EDP Monitor Error", "Falha ao criar browser")
+        print("[monitor] Could not create driver. Check logs.")
+        notify_phone(ntfy_topic, "EDP Monitor - Erro",
+                     "Falha ao criar browser. Verificar logs.")
         return
 
-    print("[main] Driver created successfully")
+    print("[monitor] Driver created successfully")
 
     # Initial check
-    print("[main] Initial check...")
+    print("[monitor] Initial check...")
     available, status = check_voucher(driver)
     timestamp = datetime.now().strftime("%H:%M:%S")
 
@@ -205,7 +270,8 @@ def main():
         print("=" * 60)
         print(">>> Open noVNC at http://<your-ha-ip>:6080 and login <<<")
         print("=" * 60)
-        notify_phone(ntfy_topic, "EDP Monitor", "Login necessario! Abre noVNC porta 6080")
+        notify_phone(ntfy_topic, "EDP Monitor - Login Necessário",
+                     "Login necessario! Abre noVNC porta 6080 para fazer login")
 
         # Wait for manual login
         while True:
@@ -214,6 +280,8 @@ def main():
             available, status = check_voucher(driver)
             if status != "precisa_login":
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Login detected!")
+                notify_phone(ntfy_topic, "EDP Monitor",
+                             "Login detectado! A iniciar monitorização...")
                 break
 
     if available is True:
@@ -233,7 +301,7 @@ def main():
         next_check = datetime.fromtimestamp(
             datetime.now().timestamp() + interval
         ).strftime("%H:%M:%S")
-        print(f"[main] #{check_count} | Next: {next_check} ({interval}s)")
+        print(f"[monitor] #{check_count} | Next: {next_check} ({interval}s)")
 
         time.sleep(interval)
         check_count += 1
@@ -252,7 +320,9 @@ def main():
                 pass
             driver = create_driver()
             if not driver:
-                print("[main] Could not recreate driver")
+                print("[monitor] Could not recreate driver")
+                notify_phone(ntfy_topic, "EDP Monitor - Erro",
+                             "Falha ao recriar browser. Verificar logs.")
                 time.sleep(60)
                 continue
             available, status = None, "driver_recreated"
@@ -269,6 +339,10 @@ def main():
 
         elif available is False:
             print(f"[{timestamp}] Sold out")
+        elif status == "precisa_login":
+            print(f"[{timestamp}] Login expired!")
+            notify_phone(ntfy_topic, "EDP Monitor - Login Necessário",
+                         "Login expirado! Abre noVNC porta 6080 para fazer login")
         else:
             print(f"[{timestamp}] Status: {status}")
 
@@ -276,7 +350,33 @@ def main():
         driver.quit()
     except:
         pass
-    print("[main] Monitor finished")
+    print("[monitor] Monitoring cycle finished")
+
+
+def main():
+    config = load_config()
+    ntfy_topic = config.get("ntfy_topic", "edp-voucher")
+    schedule_day = config.get("schedule_day", 1)
+    schedule_hour = config.get("schedule_hour", 0)
+
+    print("=" * 60)
+    print("  EDP Voucher Monitor - Home Assistant Add-on")
+    print("=" * 60)
+    print(f"  ntfy topic: {ntfy_topic}")
+    print(f"  Schedule: day {schedule_day} at {schedule_hour:02d}:00")
+    print("=" * 60)
+    print()
+
+    while True:
+        # Wait until scheduled time
+        wait_until_schedule(schedule_day, schedule_hour, ntfy_topic)
+
+        # Run monitoring
+        print(f"[main] Schedule triggered! Starting monitoring...")
+        run_monitoring(config)
+
+        # After monitoring finishes, loop back to wait for next month
+        print(f"[main] Monitoring cycle complete. Waiting for next schedule...")
 
 
 if __name__ == "__main__":

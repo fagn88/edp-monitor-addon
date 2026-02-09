@@ -1,5 +1,5 @@
 name: EDP Voucher Monitor
-version: "1.0.2"
+version: "1.1.0"
 slug: edp_voucher_monitor
 init: false
 description: Monitoriza disponibilidade de vouchers EDP Packs e envia notificacao via ntfy
@@ -8,7 +8,7 @@ arch:
   - aarch64
   - amd64
 startup: application
-boot: manual
+boot: auto
 ports:
   6080/tcp: 6080
 ports_description:
@@ -17,7 +17,11 @@ options:
   ntfy_topic: "edp-voucher-fn2026"
   check_interval_min: 240
   check_interval_max: 360
+  schedule_day: 1
+  schedule_hour: 0
 schema:
   ntfy_topic: str
   check_interval_min: int(60,600)
   check_interval_max: int(120,900)
+  schedule_day: int(1,28)
+  schedule_hour: int(0,23)
