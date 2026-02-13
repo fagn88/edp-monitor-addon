@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1
+
+- Open browser at startup for login validation via noVNC
+- Notify if login is needed on addon start
+- Reuse browser session for scheduled monitoring
+
 ## 1.1.0
 
 - Add monthly auto-scheduling (default: day 1 at 00:00)
