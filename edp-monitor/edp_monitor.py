@@ -206,8 +206,6 @@ def wait_until_schedule(schedule_day, schedule_hour, ntfy_topic):
     target_str = target.strftime("%d/%m/%Y às %H:%M")
 
     print(f"[schedule] Próxima execução: {target_str} (em {days:.1f} dias)")
-    notify_phone(ntfy_topic, "EDP Monitor - Agendado",
-                 f"Próxima execução: {target_str} (em {days:.1f} dias)")
 
     # Sleep in chunks of 1 hour to keep the process responsive
     while True:
@@ -219,8 +217,8 @@ def wait_until_schedule(schedule_day, schedule_hour, ntfy_topic):
         time.sleep(sleep_time)
 
 
-def run_monitoring(config):
-    """Run the voucher monitoring loop"""
+def run_monitoring(driver, config):
+    """Run the voucher monitoring loop (driver already created)"""
     ntfy_topic = config.get("ntfy_topic", "edp-voucher")
     interval_min = config.get("check_interval_min", 240)
     interval_max = config.get("check_interval_max", 360)
@@ -231,34 +229,10 @@ def run_monitoring(config):
     print(f"  ntfy topic: {ntfy_topic}")
     print(f"  Interval: {interval_min//60}-{interval_max//60} min")
     print("=" * 60)
-    print()
-    print(">>> Open noVNC at port 6080 to login if needed <<<")
-    print()
 
     # Notify that monitoring has started
     notify_phone(ntfy_topic, "EDP Monitor Iniciado",
                  f"Monitorização de vouchers iniciada! Intervalo: {interval_min//60}-{interval_max//60} min")
-
-    # Wait for Xvfb and VNC to start
-    print("[monitor] Waiting for display services...")
-    time.sleep(10)
-
-    # Create driver
-    print("[monitor] Creating Chrome driver...")
-    driver = create_driver()
-
-    if not driver:
-        print("[monitor] Failed to create driver, retrying in 30s...")
-        time.sleep(30)
-        driver = create_driver()
-
-    if not driver:
-        print("[monitor] Could not create driver. Check logs.")
-        notify_phone(ntfy_topic, "EDP Monitor - Erro",
-                     "Falha ao criar browser. Verificar logs.")
-        return
-
-    print("[monitor] Driver created successfully")
 
     # Initial check
     print("[monitor] Initial check...")
@@ -287,7 +261,6 @@ def run_monitoring(config):
     if available is True:
         print(f"[{timestamp}] AVAILABLE!")
         notify_phone(ntfy_topic, "VOUCHER DISPONIVEL!", "Pingo Doce 10 EUR - VAI JA!")
-        driver.quit()
         return
     elif available is False:
         print(f"[{timestamp}] Sold out")
@@ -346,10 +319,6 @@ def run_monitoring(config):
         else:
             print(f"[{timestamp}] Status: {status}")
 
-    try:
-        driver.quit()
-    except:
-        pass
     print("[monitor] Monitoring cycle finished")
 
 
@@ -367,13 +336,53 @@ def main():
     print("=" * 60)
     print()
 
+    # Wait for Xvfb and VNC to start
+    print("[main] Waiting for display services...")
+    time.sleep(10)
+
+    # Create browser at startup so user can check via noVNC
+    print("[main] Creating Chrome driver...")
+    driver = create_driver()
+
+    if not driver:
+        print("[main] Failed to create driver, retrying in 30s...")
+        time.sleep(30)
+        driver = create_driver()
+
+    if not driver:
+        print("[main] Could not create driver. Check logs.")
+        notify_phone(ntfy_topic, "EDP Monitor - Erro",
+                     "Falha ao criar browser. Verificar logs.")
+        return
+
+    print("[main] Driver created successfully")
+
+    # Navigate to EDP homepage to validate login
+    print("[main] Navigating to EDP to check login status...")
+    try:
+        driver.get(PACKS_URL)
+        time.sleep(5)
+        text = driver.find_element(By.TAG_NAME, "body").text.lower()
+        if "login" in text or "iniciar" in text:
+            print("[main] Login NOT detected - please login via noVNC at port 6080")
+            notify_phone(ntfy_topic, "EDP Monitor - Login Necessário",
+                         "Login necessario! Abre noVNC porta 6080 para fazer login")
+        else:
+            print("[main] Login OK - session is active")
+    except Exception as e:
+        print(f"[main] Error checking login: {e}")
+
+    print()
+    print(">>> noVNC available at port 6080 to verify/login <<<")
+    print()
+
     while True:
         # Wait until scheduled time
         wait_until_schedule(schedule_day, schedule_hour, ntfy_topic)
 
-        # Run monitoring
+        # Run monitoring with existing driver
         print(f"[main] Schedule triggered! Starting monitoring...")
-        run_monitoring(config)
+        run_monitoring(driver, config)
 
         # After monitoring finishes, loop back to wait for next month
         print(f"[main] Monitoring cycle complete. Waiting for next schedule...")
