@@ -3,6 +3,7 @@
 No Selenium / no requests imports. Stdlib only so tests.py can run anywhere.
 """
 
+import time
 from datetime import datetime, timedelta
 
 
@@ -80,3 +81,14 @@ def parse_voucher_status(body_text: str, button_disabled: bool) -> tuple:
         return (False, "esgotado")
 
     return (None, "erro: estado_incerto")
+
+
+def sleep_until(target: datetime) -> None:
+    """Sleep in 1-hour chunks until `target` is reached. Logs progress."""
+    while True:
+        now = datetime.now()
+        remaining = (target - now).total_seconds()
+        if remaining <= 0:
+            return
+        chunk = min(remaining, 3600)
+        time.sleep(chunk)
