@@ -16,3 +16,31 @@ def next_day_at(time_str: str, now: datetime) -> datetime:
     """Return tomorrow's date at the given HH:MM."""
     tomorrow = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     return parse_attempt_time(time_str, tomorrow)
+
+
+def compute_cycle_start(now: datetime, start_day: int, attempt_times: list) -> datetime:
+    """Return the next datetime to wake up at to begin a new cycle.
+
+    Cases (in order of evaluation):
+    - Today's date < start_day: this month's start_day at attempt_times[0]
+    - Today's date == start_day and any attempt_time is still future: that future slot today
+    - Today's date == start_day but all slots have passed: next month's start_day at attempt_times[0]
+    - Today's date > start_day: next month's start_day at attempt_times[0]
+    """
+    if now.day < start_day:
+        target = now.replace(day=start_day, hour=0, minute=0, second=0, microsecond=0)
+        return parse_attempt_time(attempt_times[0], target)
+
+    if now.day == start_day:
+        for slot_str in attempt_times:
+            slot = parse_attempt_time(slot_str, now)
+            if slot > now:
+                return slot
+        # All slots passed → fall through to next-month logic
+
+    # Today > start_day OR (today == start_day and all slots past)
+    if now.month == 12:
+        next_month = datetime(now.year + 1, 1, start_day)
+    else:
+        next_month = datetime(now.year, now.month + 1, start_day)
+    return parse_attempt_time(attempt_times[0], next_month)
