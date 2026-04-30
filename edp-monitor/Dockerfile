@@ -27,4 +27,5 @@ RUN mkdir -p /data/chrome-profile /app
 
 # Copy application files
 COPY edp_monitor.py /app/
+COPY helpers.py /app/
 COPY rootfs /
