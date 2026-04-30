@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- **Login detection latency**: `wait_for_login` now polls every 30s (was tied to `login_reminder_interval`, default 600s). User logging in is detected within ~30s instead of waiting up to 10min. ntfy reminders still throttled to `login_reminder_interval`.
+
 ## 1.2.0
 
 - **Auto-claim**: when a target voucher is detected as available, the addon now clicks through the full claim flow (Gerar código → accept terms → confirm) and captures the generated code, sending it in the ntfy notification body.

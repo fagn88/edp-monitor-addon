@@ -278,17 +278,26 @@ def claim_voucher(driver, voucher_name: str) -> dict:
     return {"code": code, "validity": validity}
 
 
+CHECK_LOGIN_EVERY = 30  # seconds; decoupled from ntfy reminder cadence
+
+
 def wait_for_login(driver, ntfy_topic: str, reminder_interval: int) -> None:
-    """Block until login is detected, sending a ntfy reminder every `reminder_interval` seconds."""
+    """Block until login is detected.
+
+    Polls login status every CHECK_LOGIN_EVERY seconds (so user logging in
+    immediately is detected within ~30s). Sends ntfy reminder only every
+    `reminder_interval` seconds (so the user doesn't get spammed).
+    """
     log("Login required - sending first notification", "WARN")
     notify_phone(
         ntfy_topic,
         "EDP Monitor - Login Necessário",
         "Login necessário! Abre noVNC porta 6080 para fazer login",
     )
+    last_reminder = time.time()
 
     while True:
-        time.sleep(reminder_interval)
+        time.sleep(CHECK_LOGIN_EVERY)
         log("Checking login status...")
         try:
             driver.get(PACKS_URL)
@@ -302,12 +311,14 @@ def wait_for_login(driver, ntfy_topic: str, reminder_interval: int) -> None:
         except Exception as e:
             log(f"Error during login check: {e}", "ERROR")
 
-        log("Still waiting for login - sending reminder", "WARN")
-        notify_phone(
-            ntfy_topic,
-            "EDP Monitor - Login Necessário",
-            "Login ainda em falta! Abre noVNC porta 6080",
-        )
+        if time.time() - last_reminder >= reminder_interval:
+            log("Still waiting for login - sending reminder", "WARN")
+            notify_phone(
+                ntfy_topic,
+                "EDP Monitor - Login Necessário",
+                "Login ainda em falta! Abre noVNC porta 6080",
+            )
+            last_reminder = time.time()
 
 
 def run_daily_attempts(driver, config: dict, claimed_set: set) -> dict:
