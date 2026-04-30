@@ -187,6 +187,97 @@ def check_voucher(driver, voucher_name: str) -> tuple:
     return (available, status)
 
 
+class ClaimError(Exception):
+    """Raised when any step of the claim flow fails."""
+
+
+def claim_voucher(driver, voucher_name: str) -> dict:
+    """Run the claim flow on the voucher detail page. Caller MUST have navigated
+    there and verified status == 'disponivel' (button enabled).
+
+    Returns {"code": str, "validity": str} on success.
+    Raises ClaimError on any timeout / element-missing.
+    """
+    log(f"[{voucher_name}] Starting claim flow")
+
+    # Step 1: Click 1st "Gerar código"
+    try:
+        btn1 = driver.find_element(By.CSS_SELECTOR, "button.btn.btn-primary.edp-large-button")
+    except NoSuchElementException:
+        raise ClaimError(f"[{voucher_name}] 1st 'Gerar código' button not found")
+    btn1.click()
+    log(f"[{voucher_name}] Clicked 1st 'Gerar código'")
+
+    # Step 2: Wait for modal
+    try:
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "ngb-modal-window"))
+        )
+    except TimeoutException:
+        raise ClaimError(f"[{voucher_name}] Modal did not open within 10s")
+    log(f"[{voucher_name}] Modal opened")
+
+    # Step 3: Click terms checkbox (native click - dispatched events don't work with Angular forms)
+    try:
+        cb = driver.find_element(
+            By.CSS_SELECTOR, "ngb-modal-window input#form-terms.form-check-input"
+        )
+    except NoSuchElementException:
+        raise ClaimError(f"[{voucher_name}] Terms checkbox not found")
+    cb.click()
+    log(f"[{voucher_name}] Terms checkbox ticked")
+
+    # Step 4: Wait for submit button to enable
+    def submit_enabled(d):
+        try:
+            b = d.find_element(
+                By.CSS_SELECTOR, "ngb-modal-window button.btn.btn-primary.submit-button"
+            )
+            return b if b.get_attribute("disabled") is None else False
+        except NoSuchElementException:
+            return False
+
+    try:
+        submit = WebDriverWait(driver, 10).until(submit_enabled)
+    except TimeoutException:
+        raise ClaimError(f"[{voucher_name}] Submit button did not enable within 10s")
+
+    # Step 5: Click submit
+    submit.click()
+    log(f"[{voucher_name}] Submit clicked")
+
+    # Step 6: Wait for success modal (the code element)
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, ".code-card-body-text-code"))
+        )
+    except TimeoutException:
+        raise ClaimError(
+            f"[{voucher_name}] Success modal with code did not appear within 15s"
+        )
+
+    # Step 7: Read code + validity
+    code = driver.find_element(By.CSS_SELECTOR, ".code-card-body-text-code").text.strip()
+    try:
+        validity_raw = driver.find_element(
+            By.CSS_SELECTOR, ".code-card-body-text-date"
+        ).text.strip()
+        # Strip "Até " prefix if present
+        validity = validity_raw.replace("Até ", "").strip()
+    except NoSuchElementException:
+        validity = "?"
+
+    log(f"[{voucher_name}] Code captured: {code} (valid until {validity})")
+
+    # Step 8: Close success modal with Escape
+    try:
+        driver.find_element(By.TAG_NAME, "body").send_keys(Keys.ESCAPE)
+    except Exception as e:
+        log(f"[{voucher_name}] Could not send Escape to close modal: {e}", "WARN")
+
+    return {"code": code, "validity": validity}
+
+
 def wait_until_schedule(schedule_day, schedule_hour, ntfy_topic):
     """Wait until the scheduled day/hour to start monitoring"""
     now = datetime.now()
