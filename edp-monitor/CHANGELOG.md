@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0
+
+- **Auto-claim**: when a target voucher is detected as available, the addon now clicks through the full claim flow (Gerar código → accept terms → confirm) and captures the generated code, sending it in the ntfy notification body.
+- **New schedule**: replaced random 4–6min interval with explicit daily slots (`attempt_times`, default 08:05/08:35/09:05). Cycle starts on `start_day` (default 1) and retries every day until all configured `targets` are claimed.
+- **End-of-day notification**: a single ntfy message after the last slot of a day if any target is still unclaimed; no more spam between attempts.
+- **Login flow**: on detected login expiry, sends ntfy immediately and repeats every `login_reminder_interval` seconds (default 600s = 10min) until login is restored, then resumes mid-day.
+- **Config schema changed**: `targets` (list of `{name, partner_id}`), `start_day`, `attempt_times`, `login_reminder_interval`. Removed: `check_interval_min`, `check_interval_max`, `schedule_hour`.
+- **Logging**: all log lines now `[YYYY-MM-DD HH:MM:SS] [LEVEL]`-prefixed and flushed on every call.
+- **Refactor**: pure logic split into `helpers.py`; `tests.py` runs stdlib-only with `python3 tests.py`.
+- **Selectors validated** 2026-04-30 against the live portal via Chrome DevTools MCP (Domino's voucher claim, code DEDP2526).
+
 ## 1.1.1
 
 - Open browser at startup for login validation via noVNC
