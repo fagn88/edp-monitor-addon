@@ -2,7 +2,6 @@
 """EDP Voucher Monitor — Home Assistant Add-on."""
 
 import json
-import os
 import sys
 import time
 import traceback
