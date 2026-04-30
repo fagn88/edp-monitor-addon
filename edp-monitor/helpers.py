@@ -53,3 +53,30 @@ def log(msg: str, level: str = "INFO", _now: datetime | None = None) -> None:
     """
     ts = (_now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] [{level}] {msg}", flush=True)
+
+
+def parse_voucher_status(body_text: str, button_disabled: bool) -> tuple:
+    """Decide voucher state from page body text and main button's disabled flag.
+
+    Returns (available, status_code):
+      (True,  "disponivel")            — button enabled, can claim now
+      (False, "saldo_insuficiente")    — in stock but balance too low
+      (False, "esgotado")              — out of stock for this cycle
+      (None,  "precisa_login")         — login redirect detected
+      (None,  "erro: estado_incerto")  — unrecognised state
+    """
+    lowered = body_text.lower()
+
+    if (("login" in lowered or "iniciar" in lowered) and len(body_text) < 500):
+        return (None, "precisa_login")
+
+    if not button_disabled:
+        return (True, "disponivel")
+
+    if "saldo insuficiente" in lowered:
+        return (False, "saldo_insuficiente")
+
+    if "esgotad" in lowered or "volte no próximo" in lowered:
+        return (False, "esgotado")
+
+    return (None, "erro: estado_incerto")

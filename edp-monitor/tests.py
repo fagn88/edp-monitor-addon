@@ -136,5 +136,44 @@ def test_log_custom_level():
     assert out == "[2026-04-30 22:15:30] [ERROR] oops\n", repr(out)
 
 
+from helpers import parse_voucher_status
+
+
+def test_status_disponivel_when_button_enabled():
+    text = "Códigos disponíveis: 2 usa 3 € Como usar..."
+    available, status = parse_voucher_status(text, button_disabled=False)
+    assert available is True and status == "disponivel", (available, status)
+
+
+def test_status_saldo_insuficiente():
+    text = "Códigos disponíveis: 2 Saldo insuficiente. Tente novamente ao receber o seu saldo mensal"
+    available, status = parse_voucher_status(text, button_disabled=True)
+    assert available is False and status == "saldo_insuficiente", (available, status)
+
+
+def test_status_esgotado_via_esgotad():
+    text = "Esgotado neste momento. Volte no próximo mês"
+    available, status = parse_voucher_status(text, button_disabled=True)
+    assert available is False and status == "esgotado", (available, status)
+
+
+def test_status_esgotado_via_volte_no_proximo():
+    text = "Volte no próximo mês para ver mais ofertas"
+    available, status = parse_voucher_status(text, button_disabled=True)
+    assert available is False and status == "esgotado", (available, status)
+
+
+def test_status_precisa_login_short_body_with_iniciar():
+    text = "Iniciar sessão"
+    available, status = parse_voucher_status(text, button_disabled=True)
+    assert available is None and status == "precisa_login", (available, status)
+
+
+def test_status_erro_estado_incerto_when_button_disabled_and_no_known_text():
+    text = "Algo estranho aconteceu, sem texto conhecido"
+    available, status = parse_voucher_status(text, button_disabled=True)
+    assert available is None and status.startswith("erro"), (available, status)
+
+
 if __name__ == "__main__":
     sys.exit(run_all_tests())
