@@ -278,6 +278,125 @@ def claim_voucher(driver, voucher_name: str) -> dict:
     return {"code": code, "validity": validity}
 
 
+def wait_for_login(driver, ntfy_topic: str, reminder_interval: int) -> None:
+    """Block until login is detected, sending a ntfy reminder every `reminder_interval` seconds."""
+    log("Login required - sending first notification", "WARN")
+    notify_phone(
+        ntfy_topic,
+        "EDP Monitor - Login Necessário",
+        "Login necessário! Abre noVNC porta 6080 para fazer login",
+    )
+
+    while True:
+        time.sleep(reminder_interval)
+        log("Checking login status...")
+        try:
+            driver.get(PACKS_URL)
+            time.sleep(3)
+            body_text = driver.find_element(By.TAG_NAME, "body").text.lower()
+            still_login = ("login" in body_text or "iniciar" in body_text) and len(body_text) < 500
+            if not still_login:
+                log("Login restored")
+                notify_phone(ntfy_topic, "EDP Monitor", "Login detectado! A retomar...")
+                return
+        except Exception as e:
+            log(f"Error during login check: {e}", "ERROR")
+
+        log("Still waiting for login - sending reminder", "WARN")
+        notify_phone(
+            ntfy_topic,
+            "EDP Monitor - Login Necessário",
+            "Login ainda em falta! Abre noVNC porta 6080",
+        )
+
+
+def run_daily_attempts(driver, config: dict, claimed_set: set) -> dict:
+    """Run all *still-future* attempt_times for the current calendar day.
+
+    Mutates `claimed_set` in place when a target gets claimed.
+    Returns dict {target_name: last_state_string} for end-of-day notification.
+    """
+    targets = config["targets"]
+    attempt_times = config["attempt_times"]
+    ntfy_topic = config["ntfy_topic"]
+    login_reminder = config["login_reminder_interval"]
+
+    states = {}
+
+    for slot_str in attempt_times:
+        slot = parse_attempt_time(slot_str, datetime.now())
+        if slot < datetime.now():
+            log(f"Skipping past slot {slot_str} (already in the past)")
+            continue
+
+        log(f"Sleeping until next slot {slot.strftime('%Y-%m-%d %H:%M:%S')}")
+        sleep_until(slot)
+
+        log(f"=== Slot {slot_str} starting ===")
+
+        for target in targets:
+            name = target["name"]
+            if name in claimed_set:
+                log(f"[{name}] Already claimed this cycle - skip")
+                continue
+
+            log(f"[{name}] Checking availability...")
+            try:
+                ok = navigate_to_voucher(driver, name)
+                if not ok:
+                    states[name] = "erro: card_not_found_or_nav_failed"
+                    continue
+                available, status = check_voucher(driver, name)
+            except Exception as e:
+                log(f"[{name}] Error during check: {e}", "ERROR")
+                traceback.print_exc()
+                states[name] = f"erro: {e}"
+                continue
+
+            states[name] = status
+
+            if status == "precisa_login":
+                wait_for_login(driver, ntfy_topic, login_reminder)
+                # Retry this voucher inside the same slot after login
+                try:
+                    ok = navigate_to_voucher(driver, name)
+                    if not ok:
+                        states[name] = "erro: nav_failed_after_login"
+                        continue
+                    available, status = check_voucher(driver, name)
+                    states[name] = status
+                except Exception as e:
+                    log(f"[{name}] Error after login retry: {e}", "ERROR")
+                    states[name] = f"erro: {e}"
+                    continue
+
+            if available is True:
+                try:
+                    result = claim_voucher(driver, name)
+                    notify_phone(
+                        ntfy_topic,
+                        "Voucher reclamado!",
+                        f"{name}: {result['code']} (válido até {result['validity']})",
+                    )
+                    claimed_set.add(name)
+                    states[name] = "reclamado"
+                    log(f"[{name}] CLAIMED: {result['code']}")
+                except ClaimError as e:
+                    log(f"[{name}] Claim failed: {e}", "ERROR")
+                    notify_phone(
+                        ntfy_topic,
+                        "Erro ao reclamar voucher",
+                        f"{name}: {e}",
+                    )
+                    states[name] = f"erro_claim: {e}"
+                except Exception as e:
+                    log(f"[{name}] Unexpected error during claim: {e}", "ERROR")
+                    traceback.print_exc()
+                    states[name] = f"erro_claim: {e}"
+
+    return states
+
+
 def wait_until_schedule(schedule_day, schedule_hour, ntfy_topic):
     """Wait until the scheduled day/hour to start monitoring"""
     now = datetime.now()
