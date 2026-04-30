@@ -1,87 +1,85 @@
 #!/usr/bin/env python3
-"""
-EDP Voucher Monitor - Home Assistant Add-on
-"""
+"""EDP Voucher Monitor — Home Assistant Add-on."""
 
-import sys
 import json
 import os
-import random
+import sys
 import time
 import traceback
+from datetime import datetime
 
-# Force unbuffered output
+# Force unbuffered output so HA addon log tails immediately
 sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
-print("[init] Starting EDP Monitor script...", flush=True)
+from helpers import (
+    compute_cycle_start,
+    log,
+    next_day_at,
+    parse_attempt_time,
+    parse_voucher_status,
+    sleep_until,
+)
+
+log("Starting EDP Monitor script...")
 
 try:
     import requests
-    print("[init] requests OK", flush=True)
+    log("requests OK")
 except Exception as e:
-    print(f"[init] Failed to import requests: {e}", flush=True)
+    log(f"Failed to import requests: {e}", "ERROR")
 
 try:
     from selenium import webdriver
+    from selenium.common.exceptions import NoSuchElementException, TimeoutException
     from selenium.webdriver.chrome.options import Options
     from selenium.webdriver.chrome.service import Service
     from selenium.webdriver.common.by import By
-    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.common.keys import Keys
     from selenium.webdriver.support import expected_conditions as EC
-    print("[init] selenium OK", flush=True)
+    from selenium.webdriver.support.ui import WebDriverWait
+    log("selenium OK")
 except Exception as e:
-    print(f"[init] Failed to import selenium: {e}", flush=True)
+    log(f"Failed to import selenium: {e}", "ERROR")
     traceback.print_exc()
     sys.exit(1)
 
-from datetime import datetime
-
-# Configuration
 CONFIG_PATH = "/data/options.json"
 PROFILE_PATH = "/data/chrome-profile"
-
-# URLs
 PACKS_URL = "https://particulares.cliente.edp.pt/beneficios/pack"
-VOUCHER_URL = "https://particulares.cliente.edp.pt/beneficios/detalhe/1197"
+
+DEFAULT_CONFIG = {
+    "ntfy_topic": "edp-voucher",
+    "start_day": 1,
+    "attempt_times": ["08:05", "08:35", "09:05"],
+    "login_reminder_interval": 600,
+    "targets": [{"name": "Pingo Doce", "partner_id": 1197}],
+}
 
 
-def load_config():
-    """Load add-on configuration"""
+def load_config() -> dict:
     try:
         with open(CONFIG_PATH) as f:
             return json.load(f)
     except Exception as e:
-        print(f"[config] Error loading config: {e}")
-        return {
-            "ntfy_topic": "edp-voucher",
-            "check_interval_min": 240,
-            "check_interval_max": 360,
-            "schedule_day": 1,
-            "schedule_hour": 0
-        }
+        log(f"Error loading config, using defaults: {e}", "WARN")
+        return DEFAULT_CONFIG
 
 
-def notify_phone(topic, title, message):
-    """Send notification via ntfy"""
+def notify_phone(topic: str, title: str, message: str) -> None:
     try:
         resp = requests.post(
             f"https://ntfy.sh/{topic}",
             data=message.encode("utf-8"),
-            headers={
-                "Title": title,
-                "Priority": "urgent",
-                "Tags": "moneybag,rotating_light"
-            },
-            timeout=10
+            headers={"Title": title, "Priority": "urgent", "Tags": "moneybag,rotating_light"},
+            timeout=10,
         )
-        print(f"[ntfy] Notification sent: {title} (status: {resp.status_code})")
+        log(f"ntfy → '{title}' (status {resp.status_code})")
     except Exception as e:
-        print(f"[ntfy] Error: {e}")
+        log(f"ntfy error: {e}", "ERROR")
 
 
 def create_driver():
-    """Create Chrome driver with persistent profile"""
     options = Options()
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -90,75 +88,104 @@ def create_driver():
     options.add_argument(f"--user-data-dir={PROFILE_PATH}")
     options.add_argument("--window-size=1280,720")
     options.binary_location = "/usr/bin/chromium-browser"
-
     service = Service("/usr/bin/chromedriver")
-
     try:
-        driver = webdriver.Chrome(service=service, options=options)
-        return driver
+        return webdriver.Chrome(service=service, options=options)
     except Exception as e:
-        print(f"[driver] Error creating driver: {e}")
+        log(f"Error creating driver: {e}", "ERROR")
         return None
 
 
-def check_voucher(driver):
-    """Check voucher availability"""
+def navigate_to_voucher(driver, voucher_name: str) -> bool:
+    """Navigate from any starting page to the voucher's detail page.
+
+    Logic:
+    1. Go to /beneficios/pack
+    2. Find <benefits-card> whose text contains voucher_name (case-insensitive)
+    3. Click its .benefits-card-wrapper via dispatched pointer events
+       (Angular ignores plain .click() on this element)
+    4. Wait up to 10s for URL to contain /beneficios/detalhe/
+
+    Returns True if landed on a detail page; False if card not found
+    or timeout. Caller decides whether to log/notify.
+    """
+    log(f"[{voucher_name}] Navigating to packs page")
+    driver.get(PACKS_URL)
+    time.sleep(3)
+
+    cards = driver.find_elements(By.TAG_NAME, "benefits-card")
+    log(f"[{voucher_name}] Found {len(cards)} benefits-card elements on page")
+
+    target_card = None
+    for card in cards:
+        if voucher_name.lower() in card.text.lower():
+            target_card = card
+            break
+
+    if not target_card:
+        log(f"[{voucher_name}] Card not found on packs page", "WARN")
+        return False
+
     try:
-        # Navigate to packs page
-        print("[check] Navigating to packs page...")
-        driver.get(PACKS_URL)
+        wrapper = target_card.find_element(By.CSS_SELECTOR, ".benefits-card-wrapper")
+    except NoSuchElementException:
+        log(f"[{voucher_name}] benefits-card-wrapper not inside card", "ERROR")
+        return False
 
-        # Wait for Pingo Doce link
-        print("[check] Waiting for Pingo Doce...")
-        try:
-            pingo_doce = WebDriverWait(driver, 20).until(
-                EC.presence_of_element_located((
-                    By.XPATH,
-                    "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'pingo doce')]"
-                ))
-            )
-        except:
-            # Try alternative - look for links
-            print("[check] Trying alternative search...")
-            links = driver.find_elements(By.TAG_NAME, "a")
-            pingo_doce = None
-            for link in links:
-                if "pingo" in link.text.lower():
-                    pingo_doce = link
-                    break
+    log(f"[{voucher_name}] Dispatching pointer events on card wrapper")
+    driver.execute_script(
+        """
+        const wrapper = arguments[0];
+        const rect = wrapper.getBoundingClientRect();
+        const x = rect.left + 10, y = rect.top + 10;
+        ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(t => {
+            wrapper.dispatchEvent(new MouseEvent(t, {
+                bubbles: true, cancelable: true, view: window,
+                clientX: x, clientY: y, button: 0
+            }));
+        });
+        """,
+        wrapper,
+    )
 
-            if not pingo_doce:
-                text = driver.find_element(By.TAG_NAME, "body").text.lower()
-                if "login" in text or "iniciar" in text:
-                    return None, "precisa_login"
-                return None, "pingo_doce_nao_encontrado"
+    try:
+        WebDriverWait(driver, 10).until(
+            lambda d: "/beneficios/detalhe/" in d.current_url
+        )
+    except TimeoutException:
+        log(f"[{voucher_name}] Did not navigate to detalhe page within 10s "
+            f"(still at {driver.current_url})", "ERROR")
+        return False
 
-        # Click on Pingo Doce
-        print("[check] Clicking Pingo Doce...")
-        pingo_doce.click()
-        time.sleep(5)
+    log(f"[{voucher_name}] Landed on {driver.current_url}")
+    return True
 
-        # Get page text
-        text = driver.find_element(By.TAG_NAME, "body").text.lower()
-        url = driver.current_url
 
-        print(f"[check] Current URL: {url}")
+def check_voucher(driver, voucher_name: str) -> tuple:
+    """Inspect the current detail page and return (available, status).
 
-        # Check status
-        if "esgotad" in text or "volte no próximo" in text:
-            return False, "esgotado"
+    Caller must have navigated to the detail page first. See parse_voucher_status
+    for the five possible status codes.
+    """
+    body_text = driver.find_element(By.TAG_NAME, "body").text
 
-        if "gerar código" in text and "esgotad" not in text:
-            return True, "disponivel"
+    try:
+        btn = driver.find_element(By.CSS_SELECTOR, "button.btn.btn-primary.edp-large-button")
+        btn_disabled = btn.get_attribute("disabled") is not None
+    except NoSuchElementException:
+        log(f"[{voucher_name}] 'Gerar código' button not found - treating as disabled", "WARN")
+        btn_disabled = True
 
-        if "login" in text and len(text) < 500:
-            return None, "precisa_login"
+    available, status = parse_voucher_status(body_text, btn_disabled)
 
-        return None, "estado_incerto"
+    # Extract codigos_disponiveis count for the log line if present
+    import re
+    m = re.search(r"C[óo]digos dispon[íi]veis:?\s*(\d+)", body_text)
+    codigos = m.group(1) if m else "?"
+    log(f"[{voucher_name}] state={status} button_disabled={btn_disabled} "
+        f"codigos_disponiveis={codigos}")
 
-    except Exception as e:
-        print(f"[check] Error: {e}")
-        return None, f"erro: {e}"
+    return (available, status)
 
 
 def wait_until_schedule(schedule_day, schedule_hour, ntfy_topic):
