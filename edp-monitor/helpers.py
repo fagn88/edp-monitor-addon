@@ -84,7 +84,10 @@ def parse_voucher_status(body_text: str, button_disabled: bool) -> tuple:
 
 
 def sleep_until(target: datetime) -> None:
-    """Sleep in 1-hour chunks until `target` is reached. Logs progress."""
+    """Sleep in 1-hour chunks until `target` is reached.
+
+    Chunked so SIGTERM during an HA addon stop can interrupt promptly.
+    """
     while True:
         now = datetime.now()
         remaining = (target - now).total_seconds()
