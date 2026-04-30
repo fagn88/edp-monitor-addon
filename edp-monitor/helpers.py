@@ -46,7 +46,7 @@ def compute_cycle_start(now: datetime, start_day: int, attempt_times: list) -> d
     return parse_attempt_time(attempt_times[0], next_month)
 
 
-def log(msg: str, level: str = "INFO", _now: datetime = None) -> None:
+def log(msg: str, level: str = "INFO", _now: datetime | None = None) -> None:
     """Print a timestamped log line to stdout, flushed.
 
     `_now` is for testing; real callers don't pass it.
