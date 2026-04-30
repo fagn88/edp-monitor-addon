@@ -34,5 +34,41 @@ def test_runner_works():
     assert 1 + 1 == 2
 
 
+from helpers import parse_attempt_time, next_day_at
+
+
+def test_parse_attempt_time_basic():
+    ref = datetime(2026, 5, 1, 12, 0)
+    got = parse_attempt_time("08:05", ref)
+    assert got == datetime(2026, 5, 1, 8, 5), got
+
+
+def test_parse_attempt_time_strips_whitespace():
+    ref = datetime(2026, 5, 1, 12, 0)
+    got = parse_attempt_time("  09:05 ", ref)
+    assert got == datetime(2026, 5, 1, 9, 5), got
+
+
+def test_parse_attempt_time_invalid_raises():
+    ref = datetime(2026, 5, 1, 12, 0)
+    try:
+        parse_attempt_time("nope", ref)
+        assert False, "should have raised"
+    except ValueError:
+        pass
+
+
+def test_next_day_at_basic():
+    now = datetime(2026, 5, 1, 23, 0)
+    got = next_day_at("08:05", now)
+    assert got == datetime(2026, 5, 2, 8, 5), got
+
+
+def test_next_day_at_crosses_month():
+    now = datetime(2026, 5, 31, 23, 0)
+    got = next_day_at("08:05", now)
+    assert got == datetime(2026, 6, 1, 8, 5), got
+
+
 if __name__ == "__main__":
     sys.exit(run_all_tests())
