@@ -464,7 +464,7 @@ def main() -> None:
 
         # Inner daily loop — one iteration per calendar day in the cycle
         while len(claimed_set) < len(config["targets"]):
-            states = run_daily_attempts(driver, config, claimed_set)
+            run_daily_attempts(driver, config, claimed_set)
 
             if len(claimed_set) == len(config["targets"]):
                 log("All targets claimed for this cycle")
