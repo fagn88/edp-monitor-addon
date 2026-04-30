@@ -44,3 +44,12 @@ def compute_cycle_start(now: datetime, start_day: int, attempt_times: list) -> d
     else:
         next_month = datetime(now.year, now.month + 1, start_day)
     return parse_attempt_time(attempt_times[0], next_month)
+
+
+def log(msg: str, level: str = "INFO", _now: datetime = None) -> None:
+    """Print a timestamped log line to stdout, flushed.
+
+    `_now` is for testing; real callers don't pass it.
+    """
+    ts = (_now or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] [{level}] {msg}", flush=True)

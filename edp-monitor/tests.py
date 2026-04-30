@@ -115,5 +115,26 @@ def test_cycle_start_year_rollover():
     assert got == datetime(2027, 1, 1, 8, 5), got
 
 
+import io
+import contextlib
+from helpers import log
+
+
+def test_log_default_level_info():
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        log("hello", _now=datetime(2026, 4, 30, 22, 15, 30))
+    out = buf.getvalue()
+    assert out == "[2026-04-30 22:15:30] [INFO] hello\n", repr(out)
+
+
+def test_log_custom_level():
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        log("oops", level="ERROR", _now=datetime(2026, 4, 30, 22, 15, 30))
+    out = buf.getvalue()
+    assert out == "[2026-04-30 22:15:30] [ERROR] oops\n", repr(out)
+
+
 if __name__ == "__main__":
     sys.exit(run_all_tests())
