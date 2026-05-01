@@ -110,7 +110,14 @@ def navigate_to_voucher(driver, voucher_name: str) -> bool:
     """
     log(f"[{voucher_name}] Navigating to packs page")
     driver.get(PACKS_URL)
-    time.sleep(3)
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.TAG_NAME, "benefits-card"))
+        )
+    except TimeoutException:
+        log(f"[{voucher_name}] No benefits-card rendered within 15s "
+            f"(at {driver.current_url})", "WARN")
+        return False
 
     cards = driver.find_elements(By.TAG_NAME, "benefits-card")
     log(f"[{voucher_name}] Found {len(cards)} benefits-card elements on page")

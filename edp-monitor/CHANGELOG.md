@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.2
+
+- **Fix Angular render race in `navigate_to_voucher`**: replaced fixed `time.sleep(3)` after `driver.get(PACKS_URL)` with `WebDriverWait` for the first `<benefits-card>` to be present (15s timeout). Observed 2026-05-01 08:35 slot finding 0 cards because Angular hadn't rendered yet; now waits for actual DOM readiness.
+
 ## 1.2.1
 
 - **Login detection latency**: `wait_for_login` now polls every 30s (was tied to `login_reminder_interval`, default 600s). User logging in is detected within ~30s instead of waiting up to 10min. ntfy reminders still throttled to `login_reminder_interval`.
