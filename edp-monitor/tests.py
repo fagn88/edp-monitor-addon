@@ -291,6 +291,88 @@ def test_should_run_immediately_no_when_all_claimed_this_month():
     assert should_run_immediately(now, history, TARGETS_ONE, 1) is False
 
 
+from helpers import parse_validity_to_month, find_claimed_targets
+
+
+def test_parse_validity_basic():
+    assert parse_validity_to_month("Até 31 Mai 2026") == "2026-05"
+
+
+def test_parse_validity_lowercase():
+    assert parse_validity_to_month("até 28 fev 2026") == "2026-02"
+
+
+def test_parse_validity_with_surrounding_text():
+    txt = "Pingo Doce Código gerado: https://x.pdf Até 31 Mai 2026"
+    assert parse_validity_to_month(txt) == "2026-05"
+
+
+def test_parse_validity_single_digit_day():
+    assert parse_validity_to_month("Até 1 Jan 2027") == "2027-01"
+
+
+def test_parse_validity_unknown_month():
+    assert parse_validity_to_month("Até 31 XXX 2026") is None
+
+
+def test_parse_validity_no_match():
+    assert parse_validity_to_month("nothing here") is None
+
+
+def test_parse_validity_all_pt_months():
+    pairs = [("jan", "01"), ("fev", "02"), ("mar", "03"), ("abr", "04"),
+             ("mai", "05"), ("jun", "06"), ("jul", "07"), ("ago", "08"),
+             ("set", "09"), ("out", "10"), ("nov", "11"), ("dez", "12")]
+    for pt, num in pairs:
+        assert parse_validity_to_month(f"Até 1 {pt.capitalize()} 2026") == \
+            f"2026-{num}", f"failed for {pt}"
+
+
+def test_find_claimed_one_match():
+    active = [
+        ("Dia-a-dia Pingo Doce", "Até 31 Mai 2026"),
+        ("Dia-a-dia Pingo Doce", "Até 30 Abr 2026"),
+        ("Restaurantes Domino's Pizzas", "Até 30 Abr 2026"),
+    ]
+    got = find_claimed_targets(active, TARGETS_TWO, "2026-05")
+    assert got == {"Pingo Doce": "Até 31 Mai 2026"}, got
+
+
+def test_find_claimed_multiple_targets():
+    active = [
+        ("Dia-a-dia Pingo Doce", "Até 31 Mai 2026"),
+        ("Restaurantes Domino's Pizzas", "Até 31 Mai 2026"),
+    ]
+    got = find_claimed_targets(active, TARGETS_TWO, "2026-05")
+    assert got == {"Pingo Doce": "Até 31 Mai 2026",
+                   "Domino's": "Até 31 Mai 2026"}, got
+
+
+def test_find_claimed_old_codes_dont_count():
+    active = [("Dia-a-dia Pingo Doce", "Até 30 Abr 2026")]
+    got = find_claimed_targets(active, TARGETS_ONE, "2026-05")
+    assert got == {}, got
+
+
+def test_find_claimed_partial_name_match():
+    # "Pingo Doce" should match "Dia-a-dia Pingo Doce" entry
+    active = [("Categoria X Pingo Doce Loja", "Até 31 Mai 2026")]
+    got = find_claimed_targets(active, TARGETS_ONE, "2026-05")
+    assert got == {"Pingo Doce": "Até 31 Mai 2026"}, got
+
+
+def test_find_claimed_case_insensitive():
+    active = [("DIA-A-DIA PINGO DOCE", "Até 31 mai 2026")]
+    got = find_claimed_targets(active, TARGETS_ONE, "2026-05")
+    assert got == {"Pingo Doce": "Até 31 mai 2026"}, got
+
+
+def test_find_claimed_no_match_when_partner_absent():
+    active = [("Restaurantes Domino's Pizzas", "Até 31 Mai 2026")]
+    got = find_claimed_targets(active, TARGETS_ONE, "2026-05")
+    assert got == {}, got
+
+
 def test_should_run_immediately_yes_when_old_claim_only():
     # Previous month's claim doesn't count
     now = datetime(2026, 5, 4, 9, 30)

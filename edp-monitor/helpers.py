@@ -5,8 +5,15 @@ No Selenium / no requests imports. Stdlib only so tests.py can run anywhere.
 
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta
+
+
+PT_MONTHS = {
+    "jan": 1, "fev": 2, "mar": 3, "abr": 4, "mai": 5, "jun": 6,
+    "jul": 7, "ago": 8, "set": 9, "out": 10, "nov": 11, "dez": 12,
+}
 
 
 def parse_attempt_time(time_str: str, ref: datetime) -> datetime:
@@ -157,6 +164,50 @@ def compute_next_wakeup(now: datetime, history: dict, targets: list,
     if tomorrow.month != now.month:
         return _first_of_next_month(now, start_day, attempt_times[0])
     return parse_attempt_time(attempt_times[0], tomorrow)
+
+
+def parse_validity_to_month(text: str) -> str | None:
+    """Parse 'Até DD Mmm YYYY' (Portuguese) into a 'YYYY-MM' month key.
+
+    Returns None if no recognisable validity is found in `text`.
+    Examples:
+      'Até 31 Mai 2026'  → '2026-05'
+      'até 28 fev 2026'  → '2026-02'
+      'no validity here' → None
+    """
+    m = re.search(r"At[ée]\s+\d{1,2}\s+([A-Za-zçÇ]{3,})\s+(\d{4})",
+                  text, re.IGNORECASE)
+    if not m:
+        return None
+    month_pt = m.group(1).lower()[:3]
+    if month_pt not in PT_MONTHS:
+        return None
+    return f"{m.group(2)}-{PT_MONTHS[month_pt]:02d}"
+
+
+def find_claimed_targets(active_codes: list, targets: list,
+                         current_month: str) -> dict:
+    """Match portal active codes against config targets for the current month.
+
+    `active_codes` is a list of (partner_text, validity_text) tuples scraped
+    from /beneficios/ativos. `targets` is config.targets list.
+
+    Returns {target_name: validity_text} for targets that have an active code
+    whose validity falls in `current_month`.
+    """
+    matched = {}
+    for target in targets:
+        name = target["name"]
+        if name in matched:
+            continue
+        for partner_text, validity_text in active_codes:
+            if name.lower() not in partner_text.lower():
+                continue
+            month = parse_validity_to_month(validity_text)
+            if month == current_month:
+                matched[name] = validity_text
+                break
+    return matched
 
 
 def should_run_immediately(now: datetime, history: dict, targets: list,

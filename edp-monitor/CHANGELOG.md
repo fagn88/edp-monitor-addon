@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.5
+
+- **Portal sync at startup**: addon now scrapes `/beneficios/ativos` after session validation and reconciles any active codes for the current month into `claim_history.json`. This means a manual claim on the website (or via the EDP mobile app) is detected on the next addon restart — no more wasted daily attempts on something the user already claimed.
+- **Validity parser**: new `parse_validity_to_month` understands EDP's `"Até DD <Mmm> YYYY"` format (Portuguese month abbreviations, case-insensitive). Tested against all 12 months.
+- DOM structure validated 2026-05-04 against the live portal: `benefits-card` cards on `/beneficios/ativos` with `.benefits-card-footer-tip` for partner name and validity text in card body.
+
 ## 1.2.4
 
 - **Persistent claim history (`/data/claim_history.json`)**: every successful claim is recorded with month, code, validity, and timestamp. Restarts now resume mid-cycle correctly instead of jumping to next month — fixes the bug where any restart after start_day silently skipped the rest of the month's window.

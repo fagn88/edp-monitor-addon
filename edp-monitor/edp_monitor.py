@@ -13,6 +13,7 @@ sys.stderr.reconfigure(line_buffering=True)
 
 from helpers import (
     compute_next_wakeup,
+    find_claimed_targets,
     load_history,
     log,
     month_key,
@@ -50,6 +51,7 @@ CONFIG_PATH = "/data/options.json"
 PROFILE_PATH = "/data/chrome-profile"
 HISTORY_PATH = "/data/claim_history.json"
 PACKS_URL = "https://particulares.cliente.edp.pt/beneficios/pack"
+ACTIVE_CODES_URL = "https://particulares.cliente.edp.pt/beneficios/ativos"
 
 DEFAULT_CONFIG = {
     "ntfy_topic": "edp-voucher",
@@ -426,6 +428,72 @@ def run_one_attempt(driver, config: dict, history: dict) -> dict:
     return states
 
 
+def fetch_active_codes(driver) -> list:
+    """Scrape /beneficios/ativos for currently-active codes.
+
+    Returns a list of (partner_text, validity_text) tuples. Empty list if
+    the page renders no cards (no codes) or if it times out — caller treats
+    that as "couldn't sync" and falls back to local history.
+    """
+    log(f"Fetching active codes from {ACTIVE_CODES_URL}")
+    driver.get(ACTIVE_CODES_URL)
+    try:
+        WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.TAG_NAME, "benefits-card"))
+        )
+    except TimeoutException:
+        log("No <benefits-card> rendered on /beneficios/ativos within 15s "
+            "(treating as zero active codes)", "WARN")
+        return []
+
+    cards = driver.find_elements(By.TAG_NAME, "benefits-card")
+    log(f"Found {len(cards)} active code card(s)")
+
+    result = []
+    for card in cards:
+        try:
+            partner = card.find_element(
+                By.CSS_SELECTOR, ".benefits-card-footer-tip"
+            ).text.strip()
+        except NoSuchElementException:
+            continue
+        text = card.text
+        result.append((partner, text))
+    return result
+
+
+def sync_history_from_portal(driver, history: dict, config: dict,
+                             current_month: str) -> int:
+    """Detect manual claims by scraping /beneficios/ativos and reconcile
+    them into the local history file. Returns count of new entries added.
+    """
+    try:
+        active = fetch_active_codes(driver)
+    except Exception as e:
+        log(f"Portal sync failed (will use local history only): {e}", "WARN")
+        return 0
+
+    matched = find_claimed_targets(active, config["targets"], current_month)
+    added = 0
+    for name, validity in matched.items():
+        if history.get(name, {}).get("month") == current_month:
+            continue
+        log(f"[{name}] Portal sync detected active code "
+            f"({validity}) — recording as claimed for {current_month}")
+        save_history(HISTORY_PATH, name, current_month,
+                     code="(portal-sync)", validity=validity,
+                     claimed_at=datetime.now())
+        history[name] = {
+            "month": current_month,
+            "code": "(portal-sync)",
+            "validity": validity,
+            "claimed_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        added += 1
+    log(f"Portal sync: {added} new history entr{'y' if added == 1 else 'ies'}")
+    return added
+
+
 def main() -> None:
     config = load_config()
     log("=" * 60)
@@ -477,6 +545,12 @@ def main() -> None:
 
     history = load_history(HISTORY_PATH)
     log(f"Loaded history: {history}")
+
+    # Reconcile local history with portal — picks up claims done manually
+    # via the website (or via the EDP mobile app) so we don't waste daily
+    # attempts on something already claimed.
+    sync_history_from_portal(driver, history, config,
+                             month_key(datetime.now()))
 
     # Startup-immediate: a restart doubles as a "try claim now" button.
     # If we're past start_day with unclaimed targets, run an attempt now
