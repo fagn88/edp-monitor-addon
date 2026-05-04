@@ -31,8 +31,10 @@ def log(msg: str, level: str = "INFO", _now: datetime | None = None) -> None:
     print(f"[{ts}] [{level}] {msg}", flush=True)
 
 
-def parse_voucher_status(body_text: str, button_disabled: bool) -> tuple:
-    """Decide voucher state from page body text and main button's disabled flag.
+def parse_voucher_status(body_text: str, button_disabled: bool,
+                         codigos_disponiveis: int | None = None) -> tuple:
+    """Decide voucher state from page body text + main button's disabled
+    flag + the parsed `Códigos disponíveis: N` count.
 
     Returns (available, status_code):
       (True,  "disponivel")            — button enabled, can claim now
@@ -53,6 +55,11 @@ def parse_voucher_status(body_text: str, button_disabled: bool) -> tuple:
         return (False, "saldo_insuficiente")
 
     if "esgotad" in lowered or "volte no próximo" in lowered:
+        return (False, "esgotado")
+
+    # Strongest signal: explicit zero count means there's nothing to claim,
+    # regardless of what surrounding copy the portal happens to use.
+    if codigos_disponiveis == 0:
         return (False, "esgotado")
 
     return (None, "erro: estado_incerto")

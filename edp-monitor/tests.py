@@ -118,6 +118,21 @@ def test_status_erro_estado_incerto_when_button_disabled_and_no_known_text():
     assert available is None and status.startswith("erro"), (available, status)
 
 
+def test_status_esgotado_via_zero_codigos_disponiveis():
+    text = "Some text without any keyword. Códigos disponíveis: 0"
+    available, status = parse_voucher_status(text, button_disabled=True,
+                                              codigos_disponiveis=0)
+    assert available is False and status == "esgotado", (available, status)
+
+
+def test_status_disponivel_overrides_zero_codigos_when_btn_enabled():
+    # Defensive: button-enabled wins over codigos=0 (portal inconsistency)
+    text = "Códigos disponíveis: 0"
+    available, status = parse_voucher_status(text, button_disabled=False,
+                                              codigos_disponiveis=0)
+    assert available is True and status == "disponivel", (available, status)
+
+
 from helpers import (
     compute_next_wakeup,
     load_history,

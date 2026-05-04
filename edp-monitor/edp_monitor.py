@@ -51,7 +51,6 @@ CONFIG_PATH = "/data/options.json"
 PROFILE_PATH = "/data/chrome-profile"
 HISTORY_PATH = "/data/claim_history.json"
 PACKS_URL = "https://particulares.cliente.edp.pt/beneficios/pack"
-ACTIVE_CODES_URL = "https://particulares.cliente.edp.pt/beneficios/ativos"
 
 DEFAULT_CONFIG = {
     "ntfy_topic": "edp-voucher",
@@ -188,14 +187,14 @@ def check_voucher(driver, voucher_name: str) -> tuple:
         log(f"[{voucher_name}] 'Gerar código' button not found - treating as disabled", "WARN")
         btn_disabled = True
 
-    available, status = parse_voucher_status(body_text, btn_disabled)
-
-    # Extract codigos_disponiveis count for the log line if present
     import re
     m = re.search(r"C[óo]digos dispon[íi]veis:?\s*(\d+)", body_text)
-    codigos = m.group(1) if m else "?"
+    codigos = int(m.group(1)) if m else None
+
+    available, status = parse_voucher_status(body_text, btn_disabled, codigos)
+
     log(f"[{voucher_name}] state={status} button_disabled={btn_disabled} "
-        f"codigos_disponiveis={codigos}")
+        f"codigos_disponiveis={codigos if codigos is not None else '?'}")
 
     return (available, status)
 
@@ -434,16 +433,48 @@ def fetch_active_codes(driver) -> list:
     Returns a list of (partner_text, validity_text) tuples. Empty list if
     the page renders no cards (no codes) or if it times out — caller treats
     that as "couldn't sync" and falls back to local history.
+
+    Navigates via /beneficios/pack → click the navbar "Códigos ativos" link.
+    Direct navigation to /beneficios/ativos leaves Angular half-bootstrapped
+    with `{{QTT_GENERATED_CODE}}` placeholder unresolved (verified live
+    2026-05-04).
     """
-    log(f"Fetching active codes from {ACTIVE_CODES_URL}")
-    driver.get(ACTIVE_CODES_URL)
+    log("Fetching active codes — going via /beneficios/pack first")
+    driver.get(PACKS_URL)
     try:
-        WebDriverWait(driver, 15).until(
+        WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.TAG_NAME, "benefits-card"))
         )
     except TimeoutException:
-        log("No <benefits-card> rendered on /beneficios/ativos within 15s "
-            "(treating as zero active codes)", "WARN")
+        log("Timeout waiting for /beneficios/pack to render — sync aborted",
+            "WARN")
+        return []
+
+    # Click the "Códigos ativos" navbar link via JS (Angular router-link).
+    # The link has no href attr in some renders, so we look it up by visible text.
+    clicked = driver.execute_script(
+        """
+        const link = Array.from(document.querySelectorAll('a'))
+            .find(a => /c[óo]digos\\s+ativos/i.test(a.innerText));
+        if (!link) return false;
+        link.click();
+        return true;
+        """
+    )
+    if not clicked:
+        log("'Códigos ativos' navbar link not found — no codes for this user?",
+            "WARN")
+        return []
+
+    try:
+        WebDriverWait(driver, 30).until(
+            lambda d: "/beneficios/ativos" in d.current_url
+            and len(d.find_elements(By.TAG_NAME, "benefits-card")) > 0
+        )
+    except TimeoutException:
+        log(f"No <benefits-card> rendered on /beneficios/ativos within 30s "
+            f"(at {driver.current_url}) — treating as zero active codes",
+            "WARN")
         return []
 
     cards = driver.find_elements(By.TAG_NAME, "benefits-card")

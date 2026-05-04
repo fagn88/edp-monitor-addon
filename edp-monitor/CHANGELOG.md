@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.6
+
+- **Fix portal sync navigation**: direct `driver.get('/beneficios/ativos')` left Angular half-bootstrapped (`{{QTT_GENERATED_CODE}}` placeholder visible, zero cards rendered, repro'd live 2026-05-04). Now navigates via `/beneficios/pack` first, then JS-clicks the "Códigos ativos" navbar link — Angular bootstraps properly, all active codes render.
+- **`codigos_disponiveis=0` → `esgotado`**: when the detail page's button is disabled AND parser sees `Códigos disponíveis: 0`, treat as `esgotado` regardless of surrounding copy. Previously fell through to `erro: estado_incerto` and triggered a misleading "Erro a reclamar" ntfy. Observed 2026-05-04 10:51 after manual claim — page text didn't match `esgotad`/`saldo`, but count was 0.
+- Both timeouts on portal sync bumped 15s → 30s.
+
 ## 1.2.5
 
 - **Portal sync at startup**: addon now scrapes `/beneficios/ativos` after session validation and reconciles any active codes for the current month into `claim_history.json`. This means a manual claim on the website (or via the EDP mobile app) is detected on the next addon restart — no more wasted daily attempts on something the user already claimed.
