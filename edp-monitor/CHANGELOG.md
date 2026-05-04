@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.3
+
+- **Fix terms checkbox click in `claim_voucher`**: native `cb.click()` was raising `ElementNotInteractableException` (input is visually hidden — Bootstrap form-check pattern). Replaced with JS click. Observed 2026-05-04 08:35 and 09:05 slots: voucher detected as `disponivel` (codigos_disponiveis=1) but claim aborted at the checkbox step both times.
+- **Distinguish unavailable vs claim error in end-of-day ntfy**: previous message said "Vouchers ainda não disponíveis hoje" even when a voucher was available but the claim crashed. Now splits into "Indisponíveis hoje" and "Erro a reclamar".
+
 ## 1.2.2
 
 - **Fix Angular render race in `navigate_to_voucher`**: replaced fixed `time.sleep(3)` after `driver.get(PACKS_URL)` with `WebDriverWait` for the first `<benefits-card>` to be present (15s timeout). Observed 2026-05-01 08:35 slot finding 0 cards because Angular hadn't rendered yet; now waits for actual DOM readiness.

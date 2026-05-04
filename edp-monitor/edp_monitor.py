@@ -224,14 +224,16 @@ def claim_voucher(driver, voucher_name: str) -> dict:
         raise ClaimError(f"[{voucher_name}] Modal did not open within 10s")
     log(f"[{voucher_name}] Modal opened")
 
-    # Step 3: Click terms checkbox (native click - dispatched events don't work with Angular forms)
+    # Step 3: Click terms checkbox via JS click. Native cb.click() raises
+    # ElementNotInteractableException because the input is visually hidden
+    # (Bootstrap form-check pattern: opacity:0 with label overlay).
     try:
         cb = driver.find_element(
             By.CSS_SELECTOR, "ngb-modal-window input#form-terms.form-check-input"
         )
     except NoSuchElementException:
         raise ClaimError(f"[{voucher_name}] Terms checkbox not found")
-    cb.click()
+    driver.execute_script("arguments[0].click();", cb)
     log(f"[{voucher_name}] Terms checkbox ticked")
 
     # Step 4: Wait for submit button to enable
@@ -482,20 +484,32 @@ def main() -> None:
 
         # Inner daily loop — one iteration per calendar day in the cycle
         while len(claimed_set) < len(config["targets"]):
-            run_daily_attempts(driver, config, claimed_set)
+            states = run_daily_attempts(driver, config, claimed_set)
 
             if len(claimed_set) == len(config["targets"]):
                 log("All targets claimed for this cycle")
                 break
 
-            unclaimed = [t["name"] for t in config["targets"] if t["name"] not in claimed_set]
-            log(f"End of day. Unclaimed: {unclaimed}")
-            notify_phone(
-                config["ntfy_topic"],
-                "EDP Monitor",
-                f"Vouchers ainda não disponíveis hoje: {', '.join(unclaimed)}. "
-                f"Tentarei amanhã às {config['attempt_times'][0]}.",
-            )
+            unavailable, errored = [], []
+            for t in config["targets"]:
+                name = t["name"]
+                if name in claimed_set:
+                    continue
+                state = states.get(name, "?")
+                if state.startswith("erro"):
+                    errored.append(name)
+                else:
+                    unavailable.append(name)
+
+            log(f"End of day. Unavailable: {unavailable} | Errored: {errored}")
+
+            parts = []
+            if unavailable:
+                parts.append(f"Indisponíveis hoje: {', '.join(unavailable)}")
+            if errored:
+                parts.append(f"Erro a reclamar (ver logs): {', '.join(errored)}")
+            parts.append(f"Tentarei amanhã às {config['attempt_times'][0]}.")
+            notify_phone(config["ntfy_topic"], "EDP Monitor", ". ".join(parts))
 
             tomorrow = next_day_at(config["attempt_times"][0], datetime.now())
             log(f"Sleeping until {tomorrow.strftime('%Y-%m-%d %H:%M:%S')}")
