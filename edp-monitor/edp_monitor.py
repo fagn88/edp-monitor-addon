@@ -12,12 +12,15 @@ sys.stdout.reconfigure(line_buffering=True)
 sys.stderr.reconfigure(line_buffering=True)
 
 from helpers import (
-    compute_cycle_start,
+    compute_next_wakeup,
+    load_history,
     log,
-    next_day_at,
-    parse_attempt_time,
+    month_key,
     parse_voucher_status,
+    save_history,
+    should_run_immediately,
     sleep_until,
+    unclaimed_for_month,
 )
 
 log("Starting EDP Monitor script...")
@@ -45,6 +48,7 @@ except Exception as e:
 
 CONFIG_PATH = "/data/options.json"
 PROFILE_PATH = "/data/chrome-profile"
+HISTORY_PATH = "/data/claim_history.json"
 PACKS_URL = "https://particulares.cliente.edp.pt/beneficios/pack"
 
 DEFAULT_CONFIG = {
@@ -330,89 +334,94 @@ def wait_for_login(driver, ntfy_topic: str, reminder_interval: int) -> None:
             last_reminder = time.time()
 
 
-def run_daily_attempts(driver, config: dict, claimed_set: set) -> dict:
-    """Run all *still-future* attempt_times for the current calendar day.
+def run_one_attempt(driver, config: dict, history: dict) -> dict:
+    """Try once, right now, to claim each unclaimed target for the current month.
 
-    Mutates `claimed_set` in place when a target gets claimed.
-    Returns dict {target_name: last_state_string} for end-of-day notification.
+    Mutates `history` in place and persists to disk on every successful claim.
+    Returns dict {target_name: status} for the caller to decide whether to
+    send a "still pending" notification.
     """
     targets = config["targets"]
-    attempt_times = config["attempt_times"]
     ntfy_topic = config["ntfy_topic"]
     login_reminder = config["login_reminder_interval"]
-
+    now = datetime.now()
+    current = month_key(now)
     states = {}
 
-    for slot_str in attempt_times:
-        slot = parse_attempt_time(slot_str, datetime.now())
-        if slot < datetime.now():
-            log(f"Skipping past slot {slot_str} (already in the past)")
+    pending = unclaimed_for_month(targets, history, current)
+    log(f"=== Attempt at {now.strftime('%Y-%m-%d %H:%M:%S')} | "
+        f"pending={pending} ===")
+
+    for target in targets:
+        name = target["name"]
+        if name not in pending:
+            log(f"[{name}] Already claimed for {current} - skip")
             continue
 
-        log(f"Sleeping until next slot {slot.strftime('%Y-%m-%d %H:%M:%S')}")
-        sleep_until(slot)
-
-        log(f"=== Slot {slot_str} starting ===")
-
-        for target in targets:
-            name = target["name"]
-            if name in claimed_set:
-                log(f"[{name}] Already claimed this cycle - skip")
+        log(f"[{name}] Checking availability...")
+        try:
+            ok = navigate_to_voucher(driver, name)
+            if not ok:
+                states[name] = "erro: card_not_found_or_nav_failed"
                 continue
+            available, status = check_voucher(driver, name)
+        except Exception as e:
+            log(f"[{name}] Error during check: {e}", "ERROR")
+            traceback.print_exc()
+            states[name] = f"erro: {e}"
+            continue
 
-            log(f"[{name}] Checking availability...")
+        states[name] = status
+
+        if status == "precisa_login":
+            wait_for_login(driver, ntfy_topic, login_reminder)
             try:
                 ok = navigate_to_voucher(driver, name)
                 if not ok:
-                    states[name] = "erro: card_not_found_or_nav_failed"
+                    states[name] = "erro: nav_failed_after_login"
                     continue
                 available, status = check_voucher(driver, name)
+                states[name] = status
             except Exception as e:
-                log(f"[{name}] Error during check: {e}", "ERROR")
-                traceback.print_exc()
+                log(f"[{name}] Error after login retry: {e}", "ERROR")
                 states[name] = f"erro: {e}"
                 continue
 
-            states[name] = status
-
-            if status == "precisa_login":
-                wait_for_login(driver, ntfy_topic, login_reminder)
-                # Retry this voucher inside the same slot after login
-                try:
-                    ok = navigate_to_voucher(driver, name)
-                    if not ok:
-                        states[name] = "erro: nav_failed_after_login"
-                        continue
-                    available, status = check_voucher(driver, name)
-                    states[name] = status
-                except Exception as e:
-                    log(f"[{name}] Error after login retry: {e}", "ERROR")
-                    states[name] = f"erro: {e}"
-                    continue
-
-            if available is True:
-                try:
-                    result = claim_voucher(driver, name)
-                    notify_phone(
-                        ntfy_topic,
-                        "Voucher reclamado!",
-                        f"{name}: {result['code']} (válido até {result['validity']})",
-                    )
-                    claimed_set.add(name)
-                    states[name] = "reclamado"
-                    log(f"[{name}] CLAIMED: {result['code']}")
-                except ClaimError as e:
-                    log(f"[{name}] Claim failed: {e}", "ERROR")
-                    notify_phone(
-                        ntfy_topic,
-                        "Erro ao reclamar voucher",
-                        f"{name}: {e}",
-                    )
-                    states[name] = f"erro_claim: {e}"
-                except Exception as e:
-                    log(f"[{name}] Unexpected error during claim: {e}", "ERROR")
-                    traceback.print_exc()
-                    states[name] = f"erro_claim: {e}"
+        if available is True:
+            try:
+                result = claim_voucher(driver, name)
+                save_history(HISTORY_PATH, name, current,
+                             result["code"], result["validity"], datetime.now())
+                history[name] = {
+                    "month": current,
+                    "code": result["code"],
+                    "validity": result["validity"],
+                    "claimed_at": datetime.now().isoformat(timespec="seconds"),
+                }
+                notify_phone(
+                    ntfy_topic,
+                    "Voucher reclamado!",
+                    f"{name}: {result['code']} (válido até {result['validity']})",
+                )
+                states[name] = "reclamado"
+                log(f"[{name}] CLAIMED: {result['code']}")
+            except ClaimError as e:
+                log(f"[{name}] Claim failed: {e}", "ERROR")
+                notify_phone(
+                    ntfy_topic,
+                    "Erro ao reclamar voucher",
+                    f"{name}: {e}",
+                )
+                states[name] = f"erro_claim: {e}"
+            except Exception as e:
+                log(f"[{name}] Unexpected error during claim: {e}", "ERROR")
+                traceback.print_exc()
+                notify_phone(
+                    ntfy_topic,
+                    "Erro inesperado ao reclamar",
+                    f"{name}: {e}",
+                )
+                states[name] = f"erro_claim: {e}"
 
     return states
 
@@ -466,54 +475,65 @@ def main() -> None:
 
     log(">>> noVNC available at port 6080 for visual inspection <<<")
 
-    # Outer cycle loop — one iteration per monthly cycle
+    history = load_history(HISTORY_PATH)
+    log(f"Loaded history: {history}")
+
+    # Startup-immediate: a restart doubles as a "try claim now" button.
+    # If we're past start_day with unclaimed targets, run an attempt now
+    # before entering the regular schedule. Idempotent — claim flow only
+    # fires when the portal's button is enabled.
+    if should_run_immediately(datetime.now(), history,
+                              config["targets"], config["start_day"]):
+        log("Startup-immediate: running attempt now")
+        states = run_one_attempt(driver, config, history)
+        _maybe_notify_pending(config, history, states)
+
     while True:
-        next_cycle = compute_cycle_start(
-            datetime.now(), config["start_day"], config["attempt_times"]
+        next_wakeup = compute_next_wakeup(
+            datetime.now(), history, config["targets"],
+            config["start_day"], config["attempt_times"],
         )
-        log(f"Next cycle starts at {next_cycle.strftime('%Y-%m-%d %H:%M:%S')}")
-        notify_phone(
-            config["ntfy_topic"],
-            "EDP Monitor",
-            f"Próxima ronda: {next_cycle.strftime('%d/%m/%Y às %H:%M')}",
-        )
-        sleep_until(next_cycle)
+        log(f"Next wakeup: {next_wakeup.strftime('%Y-%m-%d %H:%M:%S')}")
+        sleep_until(next_wakeup)
 
-        log(f"=== Starting cycle. Targets: {[t['name'] for t in config['targets']]} ===")
-        claimed_set = set()
+        states = run_one_attempt(driver, config, history)
+        _maybe_notify_pending(config, history, states)
 
-        # Inner daily loop — one iteration per calendar day in the cycle
-        while len(claimed_set) < len(config["targets"]):
-            states = run_daily_attempts(driver, config, claimed_set)
 
-            if len(claimed_set) == len(config["targets"]):
-                log("All targets claimed for this cycle")
-                break
+def _maybe_notify_pending(config: dict, history: dict, states: dict) -> None:
+    """Send an end-of-day ntfy iff we just finished today's last attempt
+    with unclaimed targets remaining. Avoids spamming between intra-day slots.
+    """
+    now = datetime.now()
+    pending = unclaimed_for_month(config["targets"], history, month_key(now))
+    if not pending:
+        return
 
-            unavailable, errored = [], []
-            for t in config["targets"]:
-                name = t["name"]
-                if name in claimed_set:
-                    continue
-                state = states.get(name, "?")
-                if state.startswith("erro"):
-                    errored.append(name)
-                else:
-                    unavailable.append(name)
+    next_wakeup = compute_next_wakeup(
+        now, history, config["targets"],
+        config["start_day"], config["attempt_times"],
+    )
+    if next_wakeup.date() <= now.date():
+        # Next attempt is still today — not end of day yet, stay quiet
+        return
 
-            log(f"End of day. Unavailable: {unavailable} | Errored: {errored}")
+    unavailable, errored = [], []
+    for name in pending:
+        state = states.get(name, "?")
+        if state.startswith("erro"):
+            errored.append(name)
+        else:
+            unavailable.append(name)
 
-            parts = []
-            if unavailable:
-                parts.append(f"Indisponíveis hoje: {', '.join(unavailable)}")
-            if errored:
-                parts.append(f"Erro a reclamar (ver logs): {', '.join(errored)}")
-            parts.append(f"Tentarei amanhã às {config['attempt_times'][0]}.")
-            notify_phone(config["ntfy_topic"], "EDP Monitor", ". ".join(parts))
+    log(f"End of day. Unavailable: {unavailable} | Errored: {errored}")
 
-            tomorrow = next_day_at(config["attempt_times"][0], datetime.now())
-            log(f"Sleeping until {tomorrow.strftime('%Y-%m-%d %H:%M:%S')}")
-            sleep_until(tomorrow)
+    parts = []
+    if unavailable:
+        parts.append(f"Indisponíveis hoje: {', '.join(unavailable)}")
+    if errored:
+        parts.append(f"Erro a reclamar (ver logs): {', '.join(errored)}")
+    parts.append(f"Próxima ronda: {next_wakeup.strftime('%d/%m %H:%M')}.")
+    notify_phone(config["ntfy_topic"], "EDP Monitor", ". ".join(parts))
 
 
 if __name__ == "__main__":

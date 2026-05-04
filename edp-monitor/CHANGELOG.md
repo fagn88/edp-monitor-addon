@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.4
+
+- **Persistent claim history (`/data/claim_history.json`)**: every successful claim is recorded with month, code, validity, and timestamp. Restarts now resume mid-cycle correctly instead of jumping to next month — fixes the bug where any restart after start_day silently skipped the rest of the month's window.
+- **Restart-as-trigger**: addon detects unclaimed targets at startup and runs an immediate attempt before entering the schedule. Use `service: hassio.addon_restart` with `addon: ae424729_edp_voucher_monitor` as a "try claim now" dashboard button.
+- **Smarter scheduling (`compute_next_wakeup`)**: replaces the old monthly-cycle outer loop. Each iteration evaluates state-from-disk and decides next wakeup: today's next slot, tomorrow's first slot, or next month's `start_day`. Robust to restarts at any point.
+- **Fixed slot-skip race in old `run_daily_attempts`**: `sleep_until(slot)` returned ~0.5s after the target, then `slot < datetime.now()` caused the slot to be skipped. New flow doesn't have inner slot loops, so the race is gone.
+- **End-of-day ntfy only fires when actually moving to next day** (or next month). Avoids spurious "Indisponíveis hoje" between intra-day slots.
+- **Removed unused `compute_cycle_start` and `next_day_at`** (dead code from the old cycle model).
+
 ## 1.2.3
 
 - **Fix terms checkbox click in `claim_voucher`**: native `cb.click()` was raising `ElementNotInteractableException` (input is visually hidden — Bootstrap form-check pattern). Replaced with JS click. Observed 2026-05-04 08:35 and 09:05 slots: voucher detected as `disponivel` (codigos_disponiveis=1) but claim aborted at the checkbox step both times.
